@@ -1,245 +1,118 @@
-# JobGenie Backend API
+# JobGenie — Backend
 
-Complete backend API for the JobGenie job search platform built with Spring Boot 3.2.0.
+## Aim
+JobGenie is an AI-assisted job search and career management platform. The backend is a **Spring Boot REST API** that powers user authentication, job listings, resume management, and job application tracking for the JobGenie web application. It is designed to give job seekers a single, secure place to manage their job search lifecycle — from storing resumes to tracking applications — while exposing clean REST endpoints that the [JobGenie UI](https://github.com/theasthashukla212/jobgenie-ui) (React frontend) consumes.
 
-## 🚀 Features
+## Overview
+This service follows a standard layered Spring Boot architecture (`controller` → `service` → `repository` → `model`) and secures its endpoints using **JWT-based authentication**. It acts as the single source of truth for:
 
-- **User Authentication** - JWT-based authentication with login/register endpoints
-- **Job Management** - Full CRUD operations for job postings with search and pagination
-- **Resume Management** - Users can create and manage multiple resumes
-- **Application Tracking** - Track job applications with status updates
-- **CORS Enabled** - Configured for frontend development on localhost:5173, 3000, 5174
+- User accounts and authentication (registration, login, JWT issuance/validation)
+- Job postings/listings
+- Resumes uploaded/managed by users
+- Job applications submitted by users and their status tracking
 
-## 🛠️ Tech Stack
+## Tech Stack
+- **Language:** Java
+- **Framework:** Spring Boot
+- **Security:** Spring Security + JWT (JSON Web Tokens)
+- **Build Tool:** Maven (`mvnw` / `mvnw.cmd` wrapper included)
+- **Data Layer:** Spring Data JPA repositories
 
-- **Java 17**
-- **Spring Boot 3.2.0**
-- **Spring Security** with JWT authentication
-- **Spring Data JPA** for database operations
-- **H2 Database** (in-memory for development)
-- **PostgreSQL** ready for production
-- **Maven** for dependency management
+## Project Structure
+```
+jobgenie/
+├── src/
+│   ├── main/
+│   │   ├── java/com/jobgenie/jobgenie_backend/
+│   │   │   ├── JobgenieBackendApplication.java   # Spring Boot entry point
+│   │   │   ├── config/                           # Security & JWT configuration
+│   │   │   │   ├── SecurityConfig.java
+│   │   │   │   ├── JwtService.java
+│   │   │   │   └── JwtAuthenticationFilter.java
+│   │   │   ├── controller/                        # REST API endpoints
+│   │   │   │   ├── AuthenticationController.java
+│   │   │   │   ├── JobController.java
+│   │   │   │   ├── ResumeController.java
+│   │   │   │   └── ApplicationController.java
+│   │   │   ├── dto/                                # Request/response payloads
+│   │   │   ├── model/                              # JPA entities
+│   │   │   │   ├── User.java
+│   │   │   │   ├── Job.java
+│   │   │   │   ├── Resume.java
+│   │   │   │   └── Application.java
+│   │   │   ├── repository/                         # Spring Data repositories
+│   │   │   └── service/                            # Business logic
+│   │   └── resources/
+│   │       └── application.properties              # App & DB configuration
+│   └── test/                                        # Unit/integration tests
+├── pom.xml                                          # Maven dependencies
+├── mvnw / mvnw.cmd                                  # Maven wrapper scripts
+└── README.md
+```
 
-## 📦 Setup Instructions
+## Core Modules
+| Module | Responsibility |
+|---|---|
+| **Authentication** | User registration, login, and JWT token issuance/validation via `AuthenticationController`, `JwtService`, and `JwtAuthenticationFilter` |
+| **Jobs** | CRUD operations on job postings via `JobController` and the `Job` entity |
+| **Resumes** | Upload/manage candidate resumes via `ResumeController` and the `Resume` entity |
+| **Applications** | Track job applications submitted by users via `ApplicationController` and the `Application` entity |
+
+## Getting Started
 
 ### Prerequisites
-- Java 17 or higher
-- Maven 3.6+
-- Node.js 18+ (for frontend)
+- Java 17+ (JDK)
+- Maven (or use the bundled `mvnw` wrapper)
+- A relational database (configured in `application.properties`)
 
-### 1. Clone the Repository
+### Setup
 ```bash
+# Clone the repository
 git clone https://github.com/theasthashukla212/jobgenie.git
 cd jobgenie
+
+# Configure your database and JWT secret in:
+# src/main/resources/application.properties
+
+# Run using the Maven wrapper
+./mvnw spring-boot:run       # Linux/Mac
+mvnw.cmd spring-boot:run     # Windows
+
+# Or build a JAR and run it
+./mvnw clean package
+java -jar target/*.jar
 ```
 
-### 2. Configure Database
-The application uses H2 in-memory database by default. For PostgreSQL:
+The API will be available at `http://localhost:8080` by default (adjust based on your `application.properties`).
 
-Update `src/main/resources/application.properties`:
-```properties
-spring.datasource.url=jdbc:postgresql://localhost:5432/jobgenie
-spring.datasource.username=postgres
-spring.datasource.password=yourpassword
-spring.jpa.database-platform=org.hibernate.dialect.PostgreSQLDialect
-```
-
-### 3. Run the Backend
+### Running Tests
 ```bash
-mvn spring-boot:run
+./mvnw test
 ```
 
-The server will start on `http://localhost:8080`
+## API Overview
+| Endpoint Group | Description |
+|---|---|
+| `/api/auth/**` | Register, login, and JWT-based authentication |
+| `/api/jobs/**` | Create, list, update, and delete job postings |
+| `/api/resumes/**` | Upload and manage user resumes |
+| `/api/applications/**` | Submit and track job applications |
 
-### 4. Access H2 Console (Development)
-- URL: `http://localhost:8080/h2-console`
-- JDBC URL: `jdbc:h2:mem:testdb`
-- Username: `sa`
-- Password: (empty)
+> Exact route paths, request/response schemas, and status codes are defined in the respective controller classes under `controller/`.
 
-## 🔐 API Endpoints
+## Related Repository
+- **Frontend:** [jobgenie-ui](https://github.com/theasthashukla212/jobgenie-ui) — React + Vite single-page application that consumes this API.
 
-### Authentication
-```
-POST /api/auth/register
-Body: {
-  "email": "user@example.com",
-  "password": "password123",
-  "firstName": "John",
-  "lastName": "Doe",
-  "phone": "+1234567890"
-}
-Response: { "token": "jwt_token", "email": "...", "firstName": "...", "lastName": "...", "id": 1 }
+## Roadmap
+- Expand API documentation (OpenAPI/Swagger)
+- Add role-based access control (candidate vs. recruiter vs. admin)
+- Integrate AI-based resume tailoring and job-matching services with the backend
+- Add pagination, filtering, and search for job listings
 
-POST /api/auth/login
-Body: {
-  "email": "user@example.com",
-  "password": "password123"
-}
-Response: { "token": "jwt_token", "email": "...", "firstName": "...", "lastName": "...", "id": 1 }
-```
+## Contributing
+1. Fork the repository and create a feature branch.
+2. Make your changes with clear, descriptive commits.
+3. Open a pull request describing the change and its motivation.
 
-### Jobs
-```
-GET /api/jobs?page=0&size=10&search=keyword
-GET /api/jobs/{id}
-POST /api/jobs
-PUT /api/jobs/{id}
-DELETE /api/jobs/{id}
-```
-
-### Resumes
-```
-GET /api/resumes?userId=1
-GET /api/resumes/{id}
-POST /api/resumes
-PUT /api/resumes/{id}
-DELETE /api/resumes/{id}
-```
-
-### Applications
-```
-GET /api/applications?userId=1
-POST /api/applications
-PUT /api/applications/{id}
-DELETE /api/applications/{id}
-```
-
-## 🔗 Frontend Integration
-
-### Connect Frontend to Backend
-
-1. **Update Frontend API Configuration**
-   
-   In `jobgenie-ui/frontend/src/services/api.js`, ensure the API base URL is set:
-   ```javascript
-   const API_BASE_URL = 'http://localhost:8080/api';
-   ```
-
-2. **Run Frontend**
-   ```bash
-   cd jobgenie-ui/frontend
-   npm install
-   npm run dev
-   ```
-
-3. **Access Application**
-   - Frontend: `http://localhost:5173`
-   - Backend API: `http://localhost:8080/api`
-
-### CORS Configuration
-
-CORS is already configured in `SecurityConfig.java` to allow:
-- `http://localhost:5173` (Vite default)
-- `http://localhost:3000` (React default)
-- `http://localhost:5174` (Alternative Vite port)
-
-## 📊 Database Schema
-
-### Users
-- id, email, password, firstName, lastName, phone, role, createdAt, updatedAt, enabled
-
-### Jobs
-- id, title, company, location, description, type, experience, salary, postedBy, postedAt, updatedAt
-
-### Resumes
-- id, user_id, title, content, filePath, isDefault, createdAt, updatedAt
-
-### Applications
-- id, user_id, job_id, resume_id, status, notes, appliedAt, updatedAt
-
-## 🧪 Testing
-
-### Test Authentication
-```bash
-curl -X POST http://localhost:8080/api/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{"email":"test@example.com","password":"password","firstName":"Test","lastName":"User","phone":"1234567890"}'
-```
-
-### Test Jobs API
-```bash
-curl -X GET http://localhost:8080/api/jobs
-```
-
-## 📝 Project Structure
-
-```
-src/main/java/com/jobgenie/jobgenie_backend/
-├── config/
-│   ├── SecurityConfig.java
-│   ├── JwtService.java
-│   └── JwtAuthenticationFilter.java
-├── controller/
-│   ├── AuthenticationController.java
-│   ├── JobController.java
-│   ├── ResumeController.java
-│   └── ApplicationController.java
-├── model/
-│   ├── User.java
-│   ├── Job.java
-│   ├── Resume.java
-│   └── Application.java
-├── repository/
-│   ├── UserRepository.java
-│   ├── JobRepository.java
-│   ├── ResumeRepository.java
-│   └── ApplicationRepository.java
-├── service/
-│   └── UserService.java
-└── dto/
-    ├── AuthRequest.java
-    ├── AuthResponse.java
-    └── RegisterRequest.java
-```
-
-## 🔧 Configuration
-
-### application.properties
-```properties
-# Server
-server.port=8080
-
-# H2 Database (Development)
-spring.datasource.url=jdbc:h2:mem:testdb
-spring.datasource.driverClassName=org.h2.Driver
-spring.datasource.username=sa
-spring.datasource.password=
-spring.jpa.database-platform=org.hibernate.dialect.H2Dialect
-spring.jpa.hibernate.ddl-auto=update
-spring.h2.console.enabled=true
-spring.h2.console.path=/h2-console
-
-# JWT Configuration
-app.jwt.secret=404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970
-app.jwt.expiration=86400000
-```
-
-## 🚨 Common Issues
-
-### Port Already in Use
-```bash
-# Kill process on port 8080
-lsof -ti:8080 | xargs kill -9
-```
-
-### CORS Errors
-- Ensure frontend is running on allowed origins (5173, 3000, or 5174)
-- Check that requests include proper headers
-
-### Database Connection Issues
-- For H2: No configuration needed, it's in-memory
-- For PostgreSQL: Update application.properties with correct credentials
-
-## 📄 License
-
-MIT License
-
-## 👥 Authors
-
-- Astha Shukla
-- Suresh Nagvanshi
-
----
-
-**Happy Coding! 🎉**
+## License
+No license file is currently specified in this repository. Add one (e.g., MIT) if you intend to open source this project.
