@@ -1,7 +1,9 @@
 package com.jobgenie.jobgenie_backend.controller;
 
 import com.jobgenie.jobgenie_backend.model.Application;
+import com.jobgenie.jobgenie_backend.model.User;
 import com.jobgenie.jobgenie_backend.repository.ApplicationRepository;
+import com.jobgenie.jobgenie_backend.service.UserService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -13,24 +15,32 @@ import java.util.List;
 public class ApplicationController {
 
     private final ApplicationRepository applicationRepository;
+    private final UserService userService;
 
-    public ApplicationController(ApplicationRepository applicationRepository) {
+    public ApplicationController(
+            ApplicationRepository applicationRepository,
+            UserService userService
+    ) {
         this.applicationRepository = applicationRepository;
+        this.userService = userService;
     }
 
     @GetMapping
     public ResponseEntity<List<Application>> getUserApplications(@RequestParam Long userId) {
-        return ResponseEntity.ok(applicationRepository.findAll());
+        User user = userService.findById(userId);
+        return ResponseEntity.ok(applicationRepository.findByUser(user));
     }
 
     @PostMapping
     public ResponseEntity<Application> createApplication(@RequestBody Application application) {
-        Application savedApplication = applicationRepository.save(application);
-        return ResponseEntity.ok(savedApplication);
+        return ResponseEntity.ok(applicationRepository.save(application));
     }
 
     @PutMapping("/{id}")
-    public ResponseEntity<Application> updateApplication(@PathVariable Long id, @RequestBody Application application) {
+    public ResponseEntity<Application> updateApplication(
+            @PathVariable Long id,
+            @RequestBody Application application
+    ) {
         return applicationRepository.findById(id)
                 .map(existingApplication -> {
                     existingApplication.setStatus(application.getStatus());
@@ -42,10 +52,11 @@ public class ApplicationController {
 
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> deleteApplication(@PathVariable Long id) {
-        if (applicationRepository.existsById(id)) {
-            applicationRepository.deleteById(id);
-            return ResponseEntity.ok().build();
+        if (!applicationRepository.existsById(id)) {
+            return ResponseEntity.notFound().build();
         }
-        return ResponseEntity.notFound().build();
+
+        applicationRepository.deleteById(id);
+        return ResponseEntity.noContent().build();
     }
 }
