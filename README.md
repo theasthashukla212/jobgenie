@@ -78,7 +78,9 @@ jobgenie/
 git clone https://github.com/theasthashukla212/jobgenie.git
 cd jobgenie
 
-# Configure environment variables when leaving the local H2 defaults.
+# Configure local environment variables in `.env`.
+# Add your Groq key to AI_API_KEY, then load it before starting Spring Boot:
+set -a && source .env && set +a
 
 # Run using the Maven wrapper
 ./mvnw spring-boot:run       # Linux/Mac
@@ -130,7 +132,7 @@ For PostgreSQL, set `DB_URL`, `DB_DRIVER=org.postgresql.Driver`, `DB_USERNAME`, 
 Example local configuration:
 
 ```bash
-export AI_API_KEY=your-provider-key
+set -a && source .env && set +a
 ./mvnw spring-boot:run
 ```
 
