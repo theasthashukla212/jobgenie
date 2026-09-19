@@ -7,6 +7,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
@@ -14,7 +15,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jobgenie.jobgenie_backend.dto.AtsScoreResponse;
@@ -40,16 +40,7 @@ public class AiService {
     }
 
     public AtsScoreResponse score(String resumeText, String jobDescription) {
-        if (apiKey.isBlank()) return fallbackScore(resumeText, jobDescription);
-        try {
-            String content = chat("Return only JSON with integer score 0-100, arrays matchingSkills and missingSkills.",
-                    "Score this resume against this job description. Resume:\n" + resumeText + "\nJob:\n" + jobDescription);
-            JsonNode json = objectMapper.readTree(stripMarkdown(content));
-                return new AtsScoreResponse(json.path("score").asInt(), strings(json.path("matchingSkills")),
-                    strings(json.path("missingSkills")), model, false);
-        } catch (JsonProcessingException | RestClientException exception) {
-            return fallbackScore(resumeText, jobDescription);
-        }
+        return fallbackScore(resumeText, jobDescription);
     }
 
     public TailorResumeResponse tailor(String resumeText, String jobDescription) {
@@ -84,10 +75,24 @@ public class AiService {
     private AtsScoreResponse fallbackScore(String resumeText, String jobDescription) {
         Set<String> resumeWords = words(resumeText);
         Set<String> jobWords = words(jobDescription);
-        List<String> matching = jobWords.stream().filter(resumeWords::contains).limit(20).toList();
-        List<String> missing = jobWords.stream().filter(word -> !resumeWords.contains(word)).limit(12).toList();
-        int score = jobWords.isEmpty() ? 0 : Math.min(100, Math.max(10, matching.size() * 100 / jobWords.size()));
+        Set<String> meaningfulJobWords = jobWords.stream().filter(word -> !STOP_WORDS.contains(word))
+                .collect(Collectors.toCollection(TreeSet::new));
+        List<String> matching = meaningfulJobWords.stream().filter(resumeWords::contains).limit(20).toList();
+        List<String> missing = meaningfulJobWords.stream().filter(word -> !resumeWords.contains(word)).limit(12).toList();
+        int keywordScore = meaningfulJobWords.isEmpty() ? 0 : matching.size() * 55 / meaningfulJobWords.size();
+        int structureScore = structureScore(resumeText);
+        int lengthScore = resumeText.trim().length() >= 250 ? 15 : 5;
+        int score = Math.min(85, keywordScore + structureScore + lengthScore);
         return new AtsScoreResponse(score, matching, missing, "local-keyword-fallback", true);
+    }
+
+    private int structureScore(String resumeText) {
+        String normalized = resumeText.toLowerCase(Locale.ROOT);
+        int sections = 0;
+        for (String section : List.of("experience", "education", "skills", "summary")) {
+            if (normalized.contains(section)) sections++;
+        }
+        return sections * 5;
     }
 
     private Set<String> words(String text) {
@@ -96,6 +101,13 @@ public class AiService {
                 .results().forEach(match -> words.add(match.group()));
         return words;
     }
+
+    private static final Set<String> STOP_WORDS = Set.of(
+            "about", "after", "again", "also", "been", "being", "between", "both", "could", "from",
+            "have", "into", "more", "most", "other", "over", "should", "some", "such", "than",
+            "that", "their", "there", "these", "they", "this", "those", "through", "under", "using",
+            "want", "with", "will", "work", "your"
+    );
 
     private List<String> strings(JsonNode node) {
         List<String> values = new java.util.ArrayList<>();
