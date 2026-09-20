@@ -17,6 +17,7 @@ import org.springframework.web.client.RestClientException;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.jobgenie.jobgenie_backend.dto.AtsBreakdown;
 import com.jobgenie.jobgenie_backend.dto.AtsScoreResponse;
 import com.jobgenie.jobgenie_backend.dto.TailorResumeResponse;
 
@@ -117,7 +118,24 @@ public class AiService {
         int structureScore = structureScore(resumeText);
         int lengthScore = resumeText.trim().length() >= 250 ? 15 : 5;
         int score = Math.min(85, keywordScore + structureScore + lengthScore);
-        return new AtsScoreResponse(score, matching, missing, "local-keyword-fallback", true);
+        int keywordCoverage = meaningfulJobWords.isEmpty() ? 0 : matching.size() * 100 / meaningfulJobWords.size();
+        List<String> recommendations = recommendations(missing, structureScore, lengthScore);
+        AtsBreakdown breakdown = new AtsBreakdown(keywordScore, structureScore, lengthScore, keywordCoverage, recommendations);
+        return new AtsScoreResponse(score, matching, missing, "local-keyword-fallback", true, breakdown);
+    }
+
+    private List<String> recommendations(List<String> missing, int structureScore, int lengthScore) {
+        List<String> values = new java.util.ArrayList<>();
+        if (!missing.isEmpty()) {
+            values.add("Add relevant evidence for: " + String.join(", ", missing.subList(0, Math.min(5, missing.size()))));
+        }
+        if (structureScore < 20) {
+            values.add("Add clear summary, skills, experience, and education sections.");
+        }
+        if (lengthScore < 15) {
+            values.add("Add more specific accomplishments, tools, and measurable outcomes.");
+        }
+        return values;
     }
 
     private int structureScore(String resumeText) {

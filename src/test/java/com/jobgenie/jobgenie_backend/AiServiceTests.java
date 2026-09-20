@@ -29,6 +29,10 @@ class AiServiceTests {
         assertTrue(result.score() <= 60);
         assertTrue(result.missingSkills().contains("aws"));
         assertTrue(result.missingSkills().contains("java"));
+        assertEquals(result.score(), Math.min(85, result.breakdown().keywordScore()
+            + result.breakdown().structureScore() + result.breakdown().lengthScore()));
+        assertTrue(result.breakdown().keywordCoverage() < 50);
+        assertTrue(result.breakdown().recommendations().stream().anyMatch(value -> value.contains("Add relevant evidence")));
     }
 
     @Test
