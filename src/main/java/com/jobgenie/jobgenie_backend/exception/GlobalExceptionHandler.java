@@ -14,8 +14,10 @@ import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.ConstraintViolationException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -25,13 +27,25 @@ public class GlobalExceptionHandler {
         for (FieldError error : exception.getBindingResult().getFieldErrors()) {
             fields.putIfAbsent(error.getField(), error.getDefaultMessage());
         }
+        if (fields.isEmpty()) {
+            fields.put("request", "One or more fields are invalid");
+        }
         return response(HttpStatus.BAD_REQUEST, "Validation Error", "One or more fields are invalid", request, fields);
     }
 
-    @ExceptionHandler({IllegalArgumentException.class, HttpMessageNotReadableException.class})
+    @ExceptionHandler(ConstraintViolationException.class)
+    ResponseEntity<ErrorResponse> constraintViolation(ConstraintViolationException exception, HttpServletRequest request) {
+        return response(HttpStatus.BAD_REQUEST, "Validation Error", exception.getMessage(), request, Map.of());
+    }
+
+    @ExceptionHandler({IllegalArgumentException.class, HttpMessageNotReadableException.class, MaxUploadSizeExceededException.class})
     ResponseEntity<ErrorResponse> badRequest(Exception exception, HttpServletRequest request) {
-        return response(HttpStatus.BAD_REQUEST, "Bad Request", exception instanceof HttpMessageNotReadableException
-                ? "Request body contains invalid or unsupported values" : exception.getMessage(), request, Map.of());
+        String message = exception instanceof HttpMessageNotReadableException
+                ? "Request body contains invalid or unsupported values"
+                : exception instanceof MaxUploadSizeExceededException
+                        ? "The uploaded file is too large"
+                        : exception.getMessage();
+        return response(HttpStatus.BAD_REQUEST, "Bad Request", message, request, Map.of());
     }
 
     @ExceptionHandler(BadCredentialsException.class)

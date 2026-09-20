@@ -45,18 +45,24 @@ public class AiService {
 
     public TailorResumeResponse tailor(String resumeText, String jobDescription) {
         if (apiKey.isBlank()) {
-            AtsScoreResponse score = fallbackScore(resumeText, jobDescription);
-            return new TailorResumeResponse(resumeText, score, "local-keyword-fallback", true);
+            return fallbackTailoredResume(resumeText, jobDescription);
         }
         try {
             String tailored = chat("Rewrite the resume for the job. Preserve facts, do not invent experience. Return only the resume text.",
                     "Resume:\n" + resumeText + "\nJob description:\n" + jobDescription);
+            if (tailored == null || tailored.isBlank()) {
+                return fallbackTailoredResume(resumeText, jobDescription);
+            }
             AtsScoreResponse score = score(tailored, jobDescription);
             return new TailorResumeResponse(tailored, score, model, false);
-        } catch (RestClientException exception) {
-            AtsScoreResponse score = fallbackScore(resumeText, jobDescription);
-            return new TailorResumeResponse(resumeText, score, "local-keyword-fallback", true);
+        } catch (RestClientException | IllegalStateException | IllegalArgumentException exception) {
+            return fallbackTailoredResume(resumeText, jobDescription);
         }
+    }
+
+    private TailorResumeResponse fallbackTailoredResume(String resumeText, String jobDescription) {
+        AtsScoreResponse score = fallbackScore(resumeText, jobDescription);
+        return new TailorResumeResponse(resumeText, score, "local-keyword-fallback", true);
     }
 
     private String chat(String system, String user) {
@@ -69,7 +75,35 @@ public class AiService {
         if (response == null || response.path("choices").isEmpty()) {
             throw new IllegalStateException("AI provider returned no response");
         }
-        return response.path("choices").path(0).path("message").path("content").asText();
+
+        JsonNode firstChoice = response.path("choices").get(0);
+        if (firstChoice == null || firstChoice.isNull()) {
+            throw new IllegalStateException("AI provider returned an empty choice");
+        }
+
+        JsonNode message = firstChoice.path("message");
+        if (message == null || message.isNull()) {
+            throw new IllegalStateException("AI provider returned an empty message");
+        }
+
+        JsonNode content = message.path("content");
+        if (content.isArray()) {
+            StringBuilder builder = new StringBuilder();
+            for (JsonNode node : content) {
+                if (node.path("text").isTextual()) {
+                    builder.append(node.path("text").asText());
+                }
+            }
+            if (builder.length() > 0) {
+                return builder.toString().trim();
+            }
+        }
+
+        String text = content.asText();
+        if (text == null || text.isBlank()) {
+            throw new IllegalStateException("AI provider returned empty content");
+        }
+        return stripMarkdown(text);
     }
 
     private AtsScoreResponse fallbackScore(String resumeText, String jobDescription) {
