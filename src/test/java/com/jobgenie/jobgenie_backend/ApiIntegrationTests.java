@@ -135,6 +135,49 @@ class ApiIntegrationTests {
     }
 
     @Test
+    void resumeVersionsCanBeCreatedListedRestoredAndAreUserOwned() throws Exception {
+        String email = "version-" + System.nanoTime() + "@example.com";
+        String registration = mockMvc.perform(post("/api/auth/register").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"" + email + "\",\"password\":\"Password1\",\"firstName\":\"Version\",\"lastName\":\"User\"}"))
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
+        String accessToken = objectMapper.readTree(registration).get("token").asText();
+        String resume = mockMvc.perform(post("/api/resumes").header("Authorization", "Bearer " + accessToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\":\"Base Resume\",\"content\":\"Original content\",\"isDefault\":true}"))
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
+        long resumeId = objectMapper.readTree(resume).get("id").asLong();
+
+        String version = mockMvc.perform(post("/api/resumes/" + resumeId + "/versions")
+                        .header("Authorization", "Bearer " + accessToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\":\"Tailored Resume\",\"content\":\"Tailored content\"}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.versionNumber").value(1))
+                .andExpect(jsonPath("$.content").value("Tailored content"))
+                .andReturn().getResponse().getContentAsString();
+        long versionId = objectMapper.readTree(version).get("id").asLong();
+
+        mockMvc.perform(get("/api/resumes/" + resumeId + "/versions")
+                        .header("Authorization", "Bearer " + accessToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value(versionId));
+
+        mockMvc.perform(post("/api/resumes/" + resumeId + "/versions/" + versionId + "/restore")
+                        .header("Authorization", "Bearer " + accessToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content").value("Tailored content"));
+
+        mockMvc.perform(get("/api/resumes/" + resumeId + "/versions/" + versionId + "/download")
+                        .header("Authorization", "Bearer " + accessToken))
+                .andExpect(status().isOk())
+                .andExpect(content().string("Tailored content"));
+
+        mockMvc.perform(get("/api/resumes/" + resumeId + "/versions")
+                        .header("Authorization", "Bearer invalid.token.value"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
     void openApiDocumentIsPublic() throws Exception {
         mockMvc.perform(get("/v3/api-docs"))
                 .andExpect(status().isOk())

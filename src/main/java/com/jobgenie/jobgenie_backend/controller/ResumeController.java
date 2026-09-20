@@ -1,6 +1,7 @@
 package com.jobgenie.jobgenie_backend.controller;
 
 import java.util.List;
+import java.util.Locale;
 
 import org.springframework.core.io.Resource;
 import org.springframework.http.HttpHeaders;
@@ -95,7 +96,7 @@ public class ResumeController {
         Resource resource = fileStorageService.load(resume.getFilePath());
         return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + resume.getTitle().replaceAll("[^A-Za-z0-9._-]", "_") + "\"")
-                .contentType(MediaType.APPLICATION_OCTET_STREAM)
+            .contentType(mediaTypeFor(resume.getFilePath()))
                 .body(resource);
     }
 
@@ -134,5 +135,14 @@ public class ResumeController {
             if (!resume.getId().equals(selected.getId())) resume.setDefault(false);
         });
         selected.setDefault(true);
+    }
+
+    private MediaType mediaTypeFor(String filePath) {
+        String path = filePath.toLowerCase(Locale.ROOT);
+        if (path.endsWith(".pdf")) return MediaType.APPLICATION_PDF;
+        if (path.endsWith(".txt")) return MediaType.TEXT_PLAIN;
+        if (path.endsWith(".doc")) return MediaType.parseMediaType("application/msword");
+        if (path.endsWith(".docx")) return MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+        return MediaType.APPLICATION_OCTET_STREAM;
     }
 }
