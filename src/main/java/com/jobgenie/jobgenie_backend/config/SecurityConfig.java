@@ -6,6 +6,7 @@ import java.util.List;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.AuthenticationProvider;
 import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
@@ -30,8 +31,8 @@ import jakarta.servlet.http.HttpServletResponse;
 @EnableMethodSecurity
 public class SecurityConfig {
 
-        @Value("${app.cors.origins}")
-        private String allowedOrigins;
+    @Value("${app.cors.origins}")
+    private String allowedOrigins;
 
     @Bean
     public SecurityFilterChain filterChain(
@@ -39,27 +40,52 @@ public class SecurityConfig {
             AuthenticationProvider authenticationProvider,
             JwtAuthenticationFilter jwtAuthenticationFilter
     ) throws Exception {
+
         http
+                // JWT-based stateless API: CSRF protection is not used.
                 .csrf(csrf -> csrf.disable())
+
+                // Enable CORS through Spring Security.
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
+
                 .headers(headers ->
                         headers.frameOptions(frameOptions -> frameOptions.disable())
                 )
+
+                // Application uses JWTs, not HTTP sessions.
                 .sessionManagement(session ->
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS)
                 )
-                                .exceptionHandling(exceptions -> exceptions
-                                                .authenticationEntryPoint((request, response, exception) -> {
-                                                        response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-                                                        response.setContentType("application/json");
-                                                        response.getWriter().write("{\"status\":401,\"error\":\"Unauthorized\",\"message\":\"Authentication is required\",\"path\":\"" + request.getRequestURI() + "\"}");
-                                                })
-                                                .accessDeniedHandler((request, response, exception) -> {
-                                                        response.setStatus(HttpServletResponse.SC_FORBIDDEN);
-                                                        response.setContentType("application/json");
-                                                        response.getWriter().write("{\"status\":403,\"error\":\"Forbidden\",\"message\":\"You do not have permission to access this resource\",\"path\":\"" + request.getRequestURI() + "\"}");
-                                                }))
+
+                .exceptionHandling(exceptions -> exceptions
+
+                        .authenticationEntryPoint((request, response, exception) -> {
+                            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                            response.setContentType("application/json");
+                            response.getWriter().write(
+                                    "{\"status\":401,\"error\":\"Unauthorized\"," +
+                                    "\"message\":\"Authentication is required\"," +
+                                    "\"path\":\"" + request.getRequestURI() + "\"}"
+                            );
+                        })
+
+                        .accessDeniedHandler((request, response, exception) -> {
+                            response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+                            response.setContentType("application/json");
+                            response.getWriter().write(
+                                    "{\"status\":403,\"error\":\"Forbidden\"," +
+                                    "\"message\":\"You do not have permission to access this resource\"," +
+                                    "\"path\":\"" + request.getRequestURI() + "\"}"
+                            );
+                        })
+                )
+
                 .authorizeHttpRequests(auth -> auth
+
+                        // Allow browser CORS preflight requests.
+                        .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
+
+                        // Public endpoints.
                         .requestMatchers(
                                 "/api/health",
                                 "/api/auth/**",
@@ -69,10 +95,21 @@ public class SecurityConfig {
                                 "/swagger-ui/**",
                                 "/swagger-ui.html"
                         ).permitAll()
-                        .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/jobs/**").permitAll()
+
+                        // Public job listing endpoints.
+                        .requestMatchers(
+                                HttpMethod.GET,
+                                "/api/jobs/**"
+                        ).permitAll()
+
+                        // Everything else requires authentication.
                         .anyRequest().authenticated()
                 )
+
+                // Preserve the existing custom AuthenticationProvider.
                 .authenticationProvider(authenticationProvider)
+
+                // Preserve the existing JWT filter.
                 .addFilterBefore(
                         jwtAuthenticationFilter,
                         UsernamePasswordAuthenticationFilter.class
@@ -87,9 +124,13 @@ public class SecurityConfig {
     }
 
     @Bean
-    public AuthenticationProvider authenticationProvider(UserDetailsService userDetailsService) {
+    public AuthenticationProvider authenticationProvider(
+            UserDetailsService userDetailsService
+    ) {
+
         DaoAuthenticationProvider provider =
                 new DaoAuthenticationProvider(userDetailsService);
+
         provider.setPasswordEncoder(passwordEncoder());
 
         return provider;
@@ -99,15 +140,30 @@ public class SecurityConfig {
     public AuthenticationManager authenticationManager(
             AuthenticationConfiguration configuration
     ) throws Exception {
+
         return configuration.getAuthenticationManager();
     }
 
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
+
         CorsConfiguration configuration = new CorsConfiguration();
 
-        configuration.setAllowedOrigins(Arrays.stream(allowedOrigins.split(","))
-                .map(String::trim).filter(origin -> !origin.isBlank()).toList());
+        /*
+         * app.cors.origins must contain ONLY the frontend origin.
+         *
+         * Correct:
+         * https://jobgenie-frontend-q66b.onrender.com
+         *
+         * Incorrect:
+         * https://jobgenie-frontend-q66b.onrender.com/api
+         */
+        configuration.setAllowedOrigins(
+                Arrays.stream(allowedOrigins.split(","))
+                        .map(String::trim)
+                        .filter(origin -> !origin.isBlank())
+                        .toList()
+        );
 
         configuration.setAllowedMethods(Arrays.asList(
                 "GET",
@@ -125,14 +181,30 @@ public class SecurityConfig {
                 "X-Requested-With"
         ));
 
-        configuration.setExposedHeaders(List.of("Authorization"));
-        configuration.setAllowCredentials(true);
+        configuration.setExposedHeaders(
+                List.of("Authorization")
+        );
+
+        /*
+         * Authentication uses JWT through:
+         *
+         * Authorization: Bearer <token>
+         *
+         * It does not use authentication cookies/session credentials,
+         * so browser credentials are not required for CORS.
+         */
+        configuration.setAllowCredentials(false);
+
+        // Cache successful preflight responses for 1 hour.
         configuration.setMaxAge(3600L);
 
         UrlBasedCorsConfigurationSource source =
                 new UrlBasedCorsConfigurationSource();
 
-        source.registerCorsConfiguration("/**", configuration);
+        source.registerCorsConfiguration(
+                "/**",
+                configuration
+        );
 
         return source;
     }
