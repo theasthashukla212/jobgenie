@@ -75,10 +75,12 @@ public class GitHubService {
             Map.entry("Swift", "#F05138")
     );
 
-    public GitHubService(GitHubConnectionRepository connectionRepository,
-                         UserRepository userRepository,
-                         JwtService jwtService,
-                         ObjectMapper objectMapper) {
+    public GitHubService(
+            GitHubConnectionRepository connectionRepository,
+            UserRepository userRepository,
+            JwtService jwtService,
+            ObjectMapper objectMapper) {
+
         this.connectionRepository = connectionRepository;
         this.userRepository = userRepository;
         this.jwtService = jwtService;
@@ -86,64 +88,192 @@ public class GitHubService {
         this.objectMapper = objectMapper;
     }
 
+    /**
+     * Generates the GitHub OAuth authorization URL.
+     */
     public String generateConnectUrl(User user) {
+
         if (clientId == null || clientId.isBlank()) {
-            throw new IllegalStateException("GitHub Client ID is not configured on the server.");
+            throw new IllegalStateException(
+                    "GitHub Client ID is not configured on the server."
+            );
         }
 
         Map<String, Object> claims = new HashMap<>();
         claims.put("userId", user.getId());
         claims.put("purpose", "github_oauth");
+
         String stateToken = jwtService.generateToken(claims, user);
 
-        return "https://github.com/login/oauth/authorize" +
-                "?client_id=" + URLEncoder.encode(clientId, StandardCharsets.UTF_8) +
-                "&redirect_uri=" + URLEncoder.encode(redirectUri, StandardCharsets.UTF_8) +
-                "&scope=" + URLEncoder.encode("read:user repo", StandardCharsets.UTF_8) +
-                "&state=" + URLEncoder.encode(stateToken, StandardCharsets.UTF_8);
+        return "https://github.com/login/oauth/authorize"
+                + "?client_id="
+                + URLEncoder.encode(clientId, StandardCharsets.UTF_8)
+                + "&redirect_uri="
+                + URLEncoder.encode(redirectUri, StandardCharsets.UTF_8)
+                + "&scope="
+                + URLEncoder.encode("read:user repo", StandardCharsets.UTF_8)
+                + "&state="
+                + URLEncoder.encode(stateToken, StandardCharsets.UTF_8);
     }
 
+    /**
+     * Handles the OAuth callback received from GitHub.
+     *
+     * IMPORTANT:
+     * The React GitHub page is located at:
+     *
+     * /dashboard/github
+     *
+     * Therefore, after successful OAuth authentication,
+     * the backend must redirect to:
+     *
+     * /dashboard/github?connected=true
+     */
     @Transactional
     public String handleOAuthCallback(String code, String state) {
-        String targetFrontendUrl = frontendUrl.replaceAll("/+$", "") + "/github";
+
+        /*
+         * IMPORTANT FIX:
+         *
+         * Previously:
+         * frontendUrl + "/github"
+         *
+         * But App.jsx defines:
+         * /dashboard/github
+         *
+         * Therefore the correct callback destination is:
+         * /dashboard/github
+         */
+        String targetFrontendUrl =
+                frontendUrl.replaceAll("/+$", "") + "/dashboard/github";
 
         try {
+
+            /*
+             * Validate OAuth state.
+             */
             if (state == null || state.isBlank()) {
-                return targetFrontendUrl + "?error=" + URLEncoder.encode("Missing state parameter", StandardCharsets.UTF_8);
+
+                return buildFrontendErrorRedirect(
+                        targetFrontendUrl,
+                        "Missing state parameter"
+                );
             }
 
+            /*
+             * Extract the JobGenie user's email from the JWT state token.
+             */
             String userEmail = jwtService.extractUsername(state);
+
             User user = userRepository.findByEmail(userEmail)
-                    .orElseThrow(() -> new IllegalArgumentException("User not found for state token."));
+                    .orElseThrow(() ->
+                            new IllegalArgumentException(
+                                    "User not found for state token."
+                            )
+                    );
 
+            /*
+             * Validate the state token.
+             */
             if (!jwtService.isTokenValid(state, user)) {
-                return targetFrontendUrl + "?error=" + URLEncoder.encode("Invalid or expired OAuth state token", StandardCharsets.UTF_8);
+
+                return buildFrontendErrorRedirect(
+                        targetFrontendUrl,
+                        "Invalid or expired OAuth state token"
+                );
             }
 
+            /*
+             * Exchange GitHub authorization code
+             * for a GitHub access token.
+             */
             String accessToken = exchangeCodeForAccessToken(code);
+
             if (accessToken == null || accessToken.isBlank()) {
-                return targetFrontendUrl + "?error=" + URLEncoder.encode("Failed to obtain GitHub access token", StandardCharsets.UTF_8);
+
+                return buildFrontendErrorRedirect(
+                        targetFrontendUrl,
+                        "Failed to obtain GitHub access token"
+                );
             }
 
+            /*
+             * Fetch the authenticated GitHub user's profile.
+             */
             JsonNode userInfo = fetchGitHubUser(accessToken);
+
             if (userInfo == null) {
-                return targetFrontendUrl + "?error=" + URLEncoder.encode("Failed to fetch GitHub profile info", StandardCharsets.UTF_8);
+
+                return buildFrontendErrorRedirect(
+                        targetFrontendUrl,
+                        "Failed to fetch GitHub profile info"
+                );
             }
 
-            Long githubUserId = userInfo.hasNonNull("id") ? userInfo.get("id").asLong() : null;
-            String githubUsername = userInfo.hasNonNull("login") ? userInfo.get("login").asText() : "";
-            String githubName = userInfo.hasNonNull("name") ? userInfo.get("name").asText() : githubUsername;
-            String avatarUrl = userInfo.hasNonNull("avatar_url") ? userInfo.get("avatar_url").asText() : null;
-            String bio = userInfo.hasNonNull("bio") ? userInfo.get("bio").asText() : "";
-            String htmlUrl = userInfo.hasNonNull("html_url") ? userInfo.get("html_url").asText() : "";
-            int followers = userInfo.hasNonNull("followers") ? userInfo.get("followers").asInt() : 0;
-            int following = userInfo.hasNonNull("following") ? userInfo.get("following").asInt() : 0;
-            int publicRepos = userInfo.hasNonNull("public_repos") ? userInfo.get("public_repos").asInt() : 0;
+            /*
+             * Extract GitHub profile information.
+             */
+            Long githubUserId =
+                    userInfo.hasNonNull("id")
+                            ? userInfo.get("id").asLong()
+                            : null;
 
-            Optional<GitHubConnection> existingConn = connectionRepository.findByUser(user);
+            String githubUsername =
+                    userInfo.hasNonNull("login")
+                            ? userInfo.get("login").asText()
+                            : "";
+
+            String githubName =
+                    userInfo.hasNonNull("name")
+                            ? userInfo.get("name").asText()
+                            : githubUsername;
+
+            String avatarUrl =
+                    userInfo.hasNonNull("avatar_url")
+                            ? userInfo.get("avatar_url").asText()
+                            : null;
+
+            String bio =
+                    userInfo.hasNonNull("bio")
+                            ? userInfo.get("bio").asText()
+                            : "";
+
+            String htmlUrl =
+                    userInfo.hasNonNull("html_url")
+                            ? userInfo.get("html_url").asText()
+                            : "";
+
+            int followers =
+                    userInfo.hasNonNull("followers")
+                            ? userInfo.get("followers").asInt()
+                            : 0;
+
+            int following =
+                    userInfo.hasNonNull("following")
+                            ? userInfo.get("following").asInt()
+                            : 0;
+
+            int publicRepos =
+                    userInfo.hasNonNull("public_repos")
+                            ? userInfo.get("public_repos").asInt()
+                            : 0;
+
+            /*
+             * Check whether this JobGenie user already has
+             * a GitHub connection.
+             */
+            Optional<GitHubConnection> existingConn =
+                    connectionRepository.findByUser(user);
+
             GitHubConnection conn;
+
             if (existingConn.isPresent()) {
+
+                /*
+                 * Update existing connection.
+                 */
                 conn = existingConn.get();
+
                 conn.setGithubUserId(githubUserId);
                 conn.setGithubUsername(githubUsername);
                 conn.setGithubName(githubName);
@@ -154,33 +284,96 @@ public class GitHubService {
                 conn.setFollowers(followers);
                 conn.setFollowing(following);
                 conn.setPublicRepos(publicRepos);
+
             } else {
+
+                /*
+                 * Create a new GitHub connection.
+                 */
                 conn = new GitHubConnection(
-                        user, githubUserId, githubUsername, githubName, avatarUrl,
-                        bio, htmlUrl, accessToken, followers, following, publicRepos
+                        user,
+                        githubUserId,
+                        githubUsername,
+                        githubName,
+                        avatarUrl,
+                        bio,
+                        htmlUrl,
+                        accessToken,
+                        followers,
+                        following,
+                        publicRepos
                 );
             }
+
+            /*
+             * Persist GitHub connection.
+             */
             connectionRepository.save(conn);
 
+            /*
+             * IMPORTANT:
+             * Redirect to the actual React route.
+             */
             return targetFrontendUrl + "?connected=true";
 
         } catch (Exception e) {
-            log.error("Error processing GitHub OAuth callback", e);
-            return targetFrontendUrl + "?error=" + URLEncoder.encode(e.getMessage() != null ? e.getMessage() : "OAuth processing error", StandardCharsets.UTF_8);
+
+            log.error(
+                    "Error processing GitHub OAuth callback",
+                    e
+            );
+
+            return buildFrontendErrorRedirect(
+                    targetFrontendUrl,
+                    e.getMessage() != null
+                            ? e.getMessage()
+                            : "OAuth processing error"
+            );
         }
     }
 
+    /**
+     * Builds an error redirect safely.
+     */
+    private String buildFrontendErrorRedirect(
+            String targetFrontendUrl,
+            String errorMessage) {
+
+        return targetFrontendUrl
+                + "?error="
+                + URLEncoder.encode(
+                        errorMessage,
+                        StandardCharsets.UTF_8
+                );
+    }
+
+    /**
+     * Gets the connected GitHub user's complete profile.
+     */
     public GitHubProfileDto getProfile(User user) {
-        Optional<GitHubConnection> optionalConn = connectionRepository.findByUser(user);
+
+        Optional<GitHubConnection> optionalConn =
+                connectionRepository.findByUser(user);
+
         if (optionalConn.isEmpty()) {
             return GitHubProfileDto.disconnected();
         }
 
         GitHubConnection conn = optionalConn.get();
+
         GitHubProfileDto dto = new GitHubProfileDto();
+
         dto.setConnected(true);
+
         dto.setUsername(conn.getGithubUsername());
-        dto.setName(conn.getGithubName() != null && !conn.getGithubName().isBlank() ? conn.getGithubName() : conn.getGithubUsername());
+
+        dto.setName(
+                conn.getGithubName() != null
+                        && !conn.getGithubName().isBlank()
+                        ? conn.getGithubName()
+                        : conn.getGithubUsername()
+        );
+
         dto.setAvatar(conn.getAvatarUrl());
         dto.setBio(conn.getBio());
         dto.setProfileUrl(conn.getHtmlUrl());
@@ -189,70 +382,215 @@ public class GitHubService {
         dto.setPublicRepos(conn.getPublicRepos());
 
         try {
-            List<JsonNode> reposList = fetchUserRepositories(conn.getAccessToken());
+
+            /*
+             * Fetch repositories from GitHub.
+             */
+            List<JsonNode> reposList =
+                    fetchUserRepositories(conn.getAccessToken());
+
             int totalStars = 0;
             int totalForks = 0;
-            Map<String, Integer> langCount = new HashMap<>();
-            List<GitHubRepoDto> repoDtos = new ArrayList<>();
+
+            Map<String, Integer> langCount =
+                    new HashMap<>();
+
+            List<GitHubRepoDto> repoDtos =
+                    new ArrayList<>();
 
             for (JsonNode repo : reposList) {
-                int stars = repo.hasNonNull("stargazers_count") ? repo.get("stargazers_count").asInt() : 0;
-                int forks = repo.hasNonNull("forks_count") ? repo.get("forks_count").asInt() : 0;
+
+                int stars =
+                        repo.hasNonNull("stargazers_count")
+                                ? repo.get("stargazers_count").asInt()
+                                : 0;
+
+                int forks =
+                        repo.hasNonNull("forks_count")
+                                ? repo.get("forks_count").asInt()
+                                : 0;
+
                 totalStars += stars;
                 totalForks += forks;
 
-                String lang = repo.hasNonNull("language") ? repo.get("language").asText() : null;
+                String lang =
+                        repo.hasNonNull("language")
+                                ? repo.get("language").asText()
+                                : null;
+
                 if (lang != null && !lang.isBlank()) {
-                    langCount.put(lang, langCount.getOrDefault(lang, 0) + 1);
+
+                    langCount.put(
+                            lang,
+                            langCount.getOrDefault(lang, 0) + 1
+                    );
                 }
 
+                /*
+                 * Repository topics.
+                 */
                 List<String> topics = new ArrayList<>();
-                if (repo.has("topics") && repo.get("topics").isArray()) {
+
+                if (repo.has("topics")
+                        && repo.get("topics").isArray()) {
+
                     for (JsonNode topicNode : repo.get("topics")) {
+
                         topics.add(topicNode.asText());
                     }
                 }
 
-                String name = repo.hasNonNull("name") ? repo.get("name").asText() : "";
-                String desc = repo.hasNonNull("description") ? repo.get("description").asText() : "";
-                String url = repo.hasNonNull("html_url") ? repo.get("html_url").asText() : "";
-                String updatedAt = repo.hasNonNull("updated_at") ? repo.get("updated_at").asText() : "";
-                Long repoId = repo.hasNonNull("id") ? repo.get("id").asLong() : 0L;
+                String name =
+                        repo.hasNonNull("name")
+                                ? repo.get("name").asText()
+                                : "";
 
-                repoDtos.add(new GitHubRepoDto(repoId, name, desc, lang != null ? lang : "Other", stars, forks, updatedAt, topics, url));
+                String desc =
+                        repo.hasNonNull("description")
+                                ? repo.get("description").asText()
+                                : "";
+
+                String url =
+                        repo.hasNonNull("html_url")
+                                ? repo.get("html_url").asText()
+                                : "";
+
+                String updatedAt =
+                        repo.hasNonNull("updated_at")
+                                ? repo.get("updated_at").asText()
+                                : "";
+
+                Long repoId =
+                        repo.hasNonNull("id")
+                                ? repo.get("id").asLong()
+                                : 0L;
+
+                repoDtos.add(
+                        new GitHubRepoDto(
+                                repoId,
+                                name,
+                                desc,
+                                lang != null ? lang : "Other",
+                                stars,
+                                forks,
+                                updatedAt,
+                                topics,
+                                url
+                        )
+                );
             }
 
+            /*
+             * Set total stars and forks.
+             */
             dto.setTotalStars(totalStars);
             dto.setTotalForks(totalForks);
 
-            // Sort top repos by stars / recency
-            repoDtos.sort((a, b) -> Integer.compare(b.getStars(), a.getStars()));
-            dto.setRepos(repoDtos.stream().limit(6).collect(Collectors.toList()));
+            /*
+             * Sort repositories by stars.
+             */
+            repoDtos.sort(
+                    (a, b) ->
+                            Integer.compare(
+                                    b.getStars(),
+                                    a.getStars()
+                            )
+            );
 
-            // Languages calculation
-            int totalLangRepos = langCount.values().stream().mapToInt(Integer::intValue).sum();
-            List<GitHubLanguageDto> languages = new ArrayList<>();
+            /*
+             * Display top 6 repositories.
+             */
+            dto.setRepos(
+                    repoDtos.stream()
+                            .limit(6)
+                            .collect(Collectors.toList())
+            );
+
+            /*
+             * Calculate language distribution.
+             */
+            int totalLangRepos =
+                    langCount.values()
+                            .stream()
+                            .mapToInt(Integer::intValue)
+                            .sum();
+
+            List<GitHubLanguageDto> languages =
+                    new ArrayList<>();
+
             if (totalLangRepos > 0) {
-                for (Map.Entry<String, Integer> entry : langCount.entrySet()) {
-                    double percentage = Math.round((entry.getValue() * 100.0 / totalLangRepos) * 10.0) / 10.0;
-                    String color = LANGUAGE_COLORS.getOrDefault(entry.getKey(), "#94A3B8");
-                    languages.add(new GitHubLanguageDto(entry.getKey(), percentage, color));
+
+                for (Map.Entry<String, Integer> entry
+                        : langCount.entrySet()) {
+
+                    double percentage =
+                            Math.round(
+                                    (
+                                            entry.getValue()
+                                                    * 100.0
+                                                    / totalLangRepos
+                                    ) * 10.0
+                            ) / 10.0;
+
+                    String color =
+                            LANGUAGE_COLORS.getOrDefault(
+                                    entry.getKey(),
+                                    "#94A3B8"
+                            );
+
+                    languages.add(
+                            new GitHubLanguageDto(
+                                    entry.getKey(),
+                                    percentage,
+                                    color
+                            )
+                    );
                 }
-                languages.sort((a, b) -> Double.compare(b.getPercentage(), a.getPercentage()));
+
+                languages.sort(
+                        (a, b) ->
+                                Double.compare(
+                                        b.getPercentage(),
+                                        a.getPercentage()
+                                )
+                );
             }
+
             dto.setLanguages(languages);
 
-            // Fetch Real Contribution Calendar via GitHub GraphQL API
-            GitHubContributionCalendarDto contributionCalendar = fetchContributionCalendar(conn.getAccessToken());
+            /*
+             * Fetch the real GitHub contribution calendar
+             * using GitHub GraphQL API.
+             */
+            GitHubContributionCalendarDto contributionCalendar =
+                    fetchContributionCalendar(
+                            conn.getAccessToken()
+                    );
+
             if (contributionCalendar != null) {
-                dto.setContributionCalendar(contributionCalendar);
-                dto.setContributions(contributionCalendar.getTotalContributions());
+
+                dto.setContributionCalendar(
+                        contributionCalendar
+                );
+
+                dto.setContributions(
+                        contributionCalendar
+                                .getTotalContributions()
+                );
+
             } else {
+
                 dto.setContributions(0);
             }
 
         } catch (Exception e) {
-            log.error("Failed to load GitHub repos or contribution calendar for user {}", conn.getGithubUsername(), e);
+
+            log.error(
+                    "Failed to load GitHub repos or contribution calendar for user {}",
+                    conn.getGithubUsername(),
+                    e
+            );
+
             dto.setTotalStars(0);
             dto.setTotalForks(0);
             dto.setContributions(0);
@@ -263,143 +601,369 @@ public class GitHubService {
         return dto;
     }
 
+    /**
+     * Disconnects the user's GitHub account.
+     */
     @Transactional
     public void disconnect(User user) {
+
         connectionRepository.deleteByUser(user);
     }
 
+    /**
+     * Exchanges the GitHub OAuth authorization code
+     * for an access token.
+     */
     private String exchangeCodeForAccessToken(String code) {
+
         try {
+
             HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
-            headers.setAccept(Collections.singletonList(MediaType.APPLICATION_JSON));
 
-            Map<String, String> requestBody = new HashMap<>();
-            requestBody.put("client_id", clientId);
-            requestBody.put("client_secret", clientSecret);
-            requestBody.put("code", code);
-            requestBody.put("redirect_uri", redirectUri);
-
-            HttpEntity<Map<String, String>> request = new HttpEntity<>(requestBody, headers);
-            ResponseEntity<String> response = restTemplate.postForEntity(
-                    "https://github.com/login/oauth/access_token",
-                    request,
-                    String.class
+            headers.setContentType(
+                    MediaType.APPLICATION_JSON
             );
 
-            if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
-                JsonNode root = objectMapper.readTree(response.getBody());
+            headers.setAccept(
+                    Collections.singletonList(
+                            MediaType.APPLICATION_JSON
+                    )
+            );
+
+            Map<String, String> requestBody =
+                    new HashMap<>();
+
+            requestBody.put(
+                    "client_id",
+                    clientId
+            );
+
+            requestBody.put(
+                    "client_secret",
+                    clientSecret
+            );
+
+            requestBody.put(
+                    "code",
+                    code
+            );
+
+            requestBody.put(
+                    "redirect_uri",
+                    redirectUri
+            );
+
+            HttpEntity<Map<String, String>> request =
+                    new HttpEntity<>(
+                            requestBody,
+                            headers
+                    );
+
+            ResponseEntity<String> response =
+                    restTemplate.postForEntity(
+                            "https://github.com/login/oauth/access_token",
+                            request,
+                            String.class
+                    );
+
+            if (response.getStatusCode().is2xxSuccessful()
+                    && response.getBody() != null) {
+
+                JsonNode root =
+                        objectMapper.readTree(
+                                response.getBody()
+                        );
+
                 if (root.hasNonNull("access_token")) {
-                    return root.get("access_token").asText();
+
+                    return root
+                            .get("access_token")
+                            .asText();
                 }
             }
+
         } catch (Exception e) {
-            log.error("Failed to exchange code for GitHub access token", e);
+
+            log.error(
+                    "Failed to exchange code for GitHub access token",
+                    e
+            );
         }
+
         return null;
     }
 
+    /**
+     * Fetches the authenticated GitHub user.
+     */
     private JsonNode fetchGitHubUser(String accessToken) {
-        try {
-            HttpHeaders headers = new HttpHeaders();
-            headers.set("Authorization", "Bearer " + accessToken);
-            headers.set("User-Agent", "JobGenie-App");
 
-            HttpEntity<Void> request = new HttpEntity<>(headers);
-            ResponseEntity<String> response = restTemplate.exchange(
-                    "https://api.github.com/user",
-                    HttpMethod.GET,
-                    request,
-                    String.class
+        try {
+
+            HttpHeaders headers =
+                    new HttpHeaders();
+
+            headers.set(
+                    "Authorization",
+                    "Bearer " + accessToken
             );
 
-            if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
-                return objectMapper.readTree(response.getBody());
+            headers.set(
+                    "User-Agent",
+                    "JobGenie-App"
+            );
+
+            HttpEntity<Void> request =
+                    new HttpEntity<>(headers);
+
+            ResponseEntity<String> response =
+                    restTemplate.exchange(
+                            "https://api.github.com/user",
+                            HttpMethod.GET,
+                            request,
+                            String.class
+                    );
+
+            if (response.getStatusCode().is2xxSuccessful()
+                    && response.getBody() != null) {
+
+                return objectMapper.readTree(
+                        response.getBody()
+                );
             }
+
         } catch (Exception e) {
-            log.error("Error fetching user from GitHub API", e);
+
+            log.error(
+                    "Error fetching user from GitHub API",
+                    e
+            );
         }
+
         return null;
     }
 
-    private List<JsonNode> fetchUserRepositories(String accessToken) {
-        List<JsonNode> reposList = new ArrayList<>();
+    /**
+     * Fetches the authenticated user's repositories.
+     */
+    private List<JsonNode> fetchUserRepositories(
+            String accessToken) {
+
+        List<JsonNode> reposList =
+                new ArrayList<>();
+
         try {
-            HttpHeaders headers = new HttpHeaders();
-            headers.set("Authorization", "Bearer " + accessToken);
-            headers.set("User-Agent", "JobGenie-App");
 
-            HttpEntity<Void> request = new HttpEntity<>(headers);
-            String url = UriComponentsBuilder.fromHttpUrl("https://api.github.com/user/repos")
-                    .queryParam("sort", "updated")
-                    .queryParam("per_page", "100")
-                    .queryParam("type", "owner")
-                    .toUriString();
+            HttpHeaders headers =
+                    new HttpHeaders();
 
-            ResponseEntity<String> response = restTemplate.exchange(
-                    url, HttpMethod.GET, request, String.class
+            headers.set(
+                    "Authorization",
+                    "Bearer " + accessToken
             );
 
-            if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
-                JsonNode arr = objectMapper.readTree(response.getBody());
+            headers.set(
+                    "User-Agent",
+                    "JobGenie-App"
+            );
+
+            HttpEntity<Void> request =
+                    new HttpEntity<>(headers);
+
+            String url =
+                    UriComponentsBuilder
+                            .fromHttpUrl(
+                                    "https://api.github.com/user/repos"
+                            )
+                            .queryParam(
+                                    "sort",
+                                    "updated"
+                            )
+                            .queryParam(
+                                    "per_page",
+                                    "100"
+                            )
+                            .queryParam(
+                                    "type",
+                                    "owner"
+                            )
+                            .toUriString();
+
+            ResponseEntity<String> response =
+                    restTemplate.exchange(
+                            url,
+                            HttpMethod.GET,
+                            request,
+                            String.class
+                    );
+
+            if (response.getStatusCode().is2xxSuccessful()
+                    && response.getBody() != null) {
+
+                JsonNode arr =
+                        objectMapper.readTree(
+                                response.getBody()
+                        );
+
                 if (arr.isArray()) {
+
                     for (JsonNode repo : arr) {
+
                         reposList.add(repo);
                     }
                 }
             }
+
         } catch (Exception e) {
-            log.error("Error fetching user repos from GitHub API", e);
+
+            log.error(
+                    "Error fetching user repos from GitHub API",
+                    e
+            );
         }
+
         return reposList;
     }
 
-    private GitHubContributionCalendarDto fetchContributionCalendar(String accessToken) {
+    /**
+     * Fetches the authenticated user's contribution
+     * calendar using GitHub GraphQL API.
+     */
+    private GitHubContributionCalendarDto
+    fetchContributionCalendar(String accessToken) {
+
         try {
-            HttpHeaders headers = new HttpHeaders();
-            headers.set("Authorization", "Bearer " + accessToken);
-            headers.setContentType(MediaType.APPLICATION_JSON);
-            headers.set("User-Agent", "JobGenie-App");
 
-            String query = "{\"query\":\"query { viewer { contributionsCollection { contributionCalendar { totalContributions weeks { contributionDays { contributionCount date color } } } } } }\"}";
-            HttpEntity<String> request = new HttpEntity<>(query, headers);
+            HttpHeaders headers =
+                    new HttpHeaders();
 
-            ResponseEntity<String> response = restTemplate.postForEntity(
-                    "https://api.github.com/graphql",
-                    request,
-                    String.class
+            headers.set(
+                    "Authorization",
+                    "Bearer " + accessToken
             );
 
-            if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
-                JsonNode root = objectMapper.readTree(response.getBody());
-                JsonNode calendarNode = root.path("data").path("viewer").path("contributionsCollection").path("contributionCalendar");
+            headers.setContentType(
+                    MediaType.APPLICATION_JSON
+            );
+
+            headers.set(
+                    "User-Agent",
+                    "JobGenie-App"
+            );
+
+            String query =
+                    "{\"query\":\"query { viewer { contributionsCollection { contributionCalendar { totalContributions weeks { contributionDays { contributionCount date color } } } } } }\"}";
+
+            HttpEntity<String> request =
+                    new HttpEntity<>(
+                            query,
+                            headers
+                    );
+
+            ResponseEntity<String> response =
+                    restTemplate.postForEntity(
+                            "https://api.github.com/graphql",
+                            request,
+                            String.class
+                    );
+
+            if (response.getStatusCode().is2xxSuccessful()
+                    && response.getBody() != null) {
+
+                JsonNode root =
+                        objectMapper.readTree(
+                                response.getBody()
+                        );
+
+                JsonNode calendarNode =
+                        root.path("data")
+                                .path("viewer")
+                                .path("contributionsCollection")
+                                .path("contributionCalendar");
 
                 if (!calendarNode.isMissingNode()) {
-                    int totalContributions = calendarNode.path("totalContributions").asInt(0);
-                    JsonNode weeksNode = calendarNode.path("weeks");
-                    List<GitHubContributionCalendarDto.Week> weeks = new ArrayList<>();
+
+                    int totalContributions =
+                            calendarNode
+                                    .path("totalContributions")
+                                    .asInt(0);
+
+                    JsonNode weeksNode =
+                            calendarNode.path("weeks");
+
+                    List<GitHubContributionCalendarDto.Week> weeks =
+                            new ArrayList<>();
 
                     if (weeksNode.isArray()) {
-                        for (JsonNode weekNode : weeksNode) {
-                            JsonNode daysNode = weekNode.path("contributionDays");
-                            List<GitHubContributionCalendarDto.ContributionDay> days = new ArrayList<>();
+
+                        for (JsonNode weekNode
+                                : weeksNode) {
+
+                            JsonNode daysNode =
+                                    weekNode.path(
+                                            "contributionDays"
+                                    );
+
+                            List<GitHubContributionCalendarDto.ContributionDay> days =
+                                    new ArrayList<>();
+
                             if (daysNode.isArray()) {
-                                for (JsonNode dayNode : daysNode) {
-                                    int count = dayNode.path("contributionCount").asInt(0);
-                                    String date = dayNode.path("date").asText("");
-                                    String color = dayNode.path("color").asText("#ebedf0");
-                                    days.add(new GitHubContributionCalendarDto.ContributionDay(count, date, color));
+
+                                for (JsonNode dayNode
+                                        : daysNode) {
+
+                                    int count =
+                                            dayNode
+                                                    .path(
+                                                            "contributionCount"
+                                                    )
+                                                    .asInt(0);
+
+                                    String date =
+                                            dayNode
+                                                    .path("date")
+                                                    .asText("");
+
+                                    String color =
+                                            dayNode
+                                                    .path("color")
+                                                    .asText(
+                                                            "#ebedf0"
+                                                    );
+
+                                    days.add(
+                                            new GitHubContributionCalendarDto.ContributionDay(
+                                                    count,
+                                                    date,
+                                                    color
+                                            )
+                                    );
                                 }
                             }
-                            weeks.add(new GitHubContributionCalendarDto.Week(days));
+
+                            weeks.add(
+                                    new GitHubContributionCalendarDto.Week(
+                                            days
+                                    )
+                            );
                         }
                     }
-                    return new GitHubContributionCalendarDto(totalContributions, weeks);
+
+                    return new GitHubContributionCalendarDto(
+                            totalContributions,
+                            weeks
+                    );
                 }
             }
+
         } catch (Exception e) {
-            log.warn("Unable to fetch GitHub GraphQL contribution calendar", e);
+
+            log.warn(
+                    "Unable to fetch GitHub GraphQL contribution calendar",
+                    e
+            );
         }
+
         return null;
     }
 }
